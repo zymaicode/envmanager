@@ -1,0 +1,66 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg-primary: #F7F5F2;
+  --color-bg-content: #FAF9F7;
+  --color-bg-card: #FFFFFF;
+  --color-text-primary: #1A1A1A;
+  --color-text-secondary: #666666;
+  --color-text-muted: #999999;
+  --color-border: #E8E4DF;
+  --color-accent: #B97C57;
+  --color-accent-light: #E8D5CB;
+  --color-accent-hover: #A06B4A;
+  --color-status-green: #7BA87F;
+  --color-status-yellow: #D4A853;
+  --color-status-red: #C4665A;
+  --color-progress: #A9B4C2;
+  --font-sans: "Inter", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+
+  /* 收紧字号阶梯：桌面应用基准 13px，比 Web 的 16px 整体缩小 */
+  --text-xs: 0.6875rem;    /* 11px：辅助标签、徽章 */
+  --text-xs--line-height: 1rem;
+  --text-sm: 0.8125rem;    /* 13px：正文、表格、sidebar、按钮 */
+  --text-sm--line-height: 1.25rem;
+  --text-base: 0.875rem;   /* 14px：卡片标题、强调文本 */
+  --text-base--line-height: 1.375rem;
+  --text-lg: 0.9375rem;    /* 15px：对话框标题、次级标题 */
+  --text-lg--line-height: 1.5rem;
+  --text-xl: 1.0625rem;    /* 17px：页面主标题 */
+  --text-xl--line-height: 1.625rem;
+  --text-2xl: 1.25rem;     /* 20px：统计数字 */
+  --text-2xl--line-height: 1.75rem;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  font-family: var(--font-sans);
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}

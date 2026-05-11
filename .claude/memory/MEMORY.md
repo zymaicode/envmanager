@@ -1,0 +1,2 @@
+- [打包命令](project-build-commands.md) — `npm run pack`（免安装绿色版）和 `npm run dist`（NSIS 安装包）
+- [GitHub 仓库](project-repo-info.md) — https://github.com/zymaicode/envmanager.git
