@@ -11,6 +11,8 @@
     "preview": "electron-vite preview",
     "pack": "electron-vite build && electron-builder --dir",
     "dist": "electron-vite build && electron-builder",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "postinstall": "electron-builder install-app-deps"
   },
   "build": {
@@ -77,6 +79,7 @@
     "sharp": "^0.34.5",
     "tailwindcss": "^4.3.0",
     "typescript": "^5.5.4",
-    "vite": "^5.4.3"
+    "vite": "^5.4.3",
+    "vitest": "^4.1.6"
   }
 }
