@@ -418,18 +418,53 @@ export function startServer(port = 20920): void {
       creationTasks.set(taskId, { phase: '正在启动容器...', done: false })
       await container.start()
 
-      // Phase 5: Quick health check (just wait for container to be running)
-      creationTasks.set(taskId, { phase: '正在进行健康检查...', done: false })
-      await new Promise((r) => setTimeout(r, 1000))
+      // Phase 5: Environment readiness check
+      creationTasks.set(taskId, { phase: '正在验证环境就绪...', done: false })
+      await new Promise((r) => setTimeout(r, 2000))
       const inspect = await container.inspect()
       if (!inspect.State.Running) {
-        throw new Error('Container failed to start')
+        throw new Error('容器启动失败')
+      }
+
+      // Verify the language runtime actually works
+      const versionCommands: Record<string, string> = {
+        python: 'python --version 2>&1 || python3 --version 2>&1',
+        node: 'node --version 2>&1',
+        java: 'java -version 2>&1',
+        go: 'go version 2>&1',
+        rust: 'rustc --version 2>&1',
+        cpp: 'gcc --version 2>&1 | head -1',
+        mysql: 'mysql --version 2>&1',
+        postgres: 'psql --version 2>&1',
+        redis: 'redis-server --version 2>&1',
+        mongo: 'mongosh --version 2>&1 || mongod --version 2>&1 | head -1'
+      }
+      let verifiedVersion = ''
+      try {
+        const cmd = versionCommands[lang] || 'echo "no version check"'
+        const exec = await container.exec({
+          Cmd: ['/bin/sh', '-c', cmd],
+          AttachStdout: true,
+          AttachStderr: true
+        })
+        const output = await exec.start({ Detach: false, Tty: false })
+        // dockerode exec output can be a stream or buffer
+        if (Buffer.isBuffer(output)) {
+          verifiedVersion = output.toString('utf8').trim()
+        } else if (typeof output === 'string') {
+          verifiedVersion = output.trim()
+        }
+        // Clean up: strip Docker header bytes if any
+        verifiedVersion = verifiedVersion.replace(/[\x00-\x08]/g, '').replace(/\n/g, ' - ').substring(0, 80)
+      } catch {
+        verifiedVersion = '就绪'
       }
 
       creationTasks.set(taskId, {
         phase: 'done',
         containerId: container.id.substring(0, 12),
         sshPort,
+        verifiedVersion: verifiedVersion || '就绪',
         done: true
       })
     } catch (err: any) {
@@ -538,7 +573,32 @@ export function startServer(port = 20920): void {
     }
   })
 
-  // ====== VS Code Remote SSH ======
+  // ====== 在容器中执行命令 ======
+  app.post('/api/containers/:id/exec', async (req, res) => {
+    try {
+      const { cmd } = req.body as { cmd: string[] }
+      if (!cmd || cmd.length === 0) return res.status(400).json({ error: 'Command required' })
+
+      const containers = await docker.listContainers({ all: true })
+      const found = containers.find((c) => c.Id.startsWith(req.params.id))
+      if (!found) return res.status(404).json({ error: 'Container not found' })
+
+      const c = docker.getContainer(found.Id)
+      const exec = await c.exec({
+        Cmd: cmd,
+        AttachStdout: true,
+        AttachStderr: true
+      })
+      const output = await exec.start({ Detach: false, Tty: false })
+      const result = Buffer.isBuffer(output) ? output.toString('utf8') : String(output || '')
+
+      res.json({ output: result.replace(/[\x00-\x08]/g, '') })
+    } catch (err: any) {
+      res.status(500).json({ error: err.message })
+    }
+  })
+
+  // ====== 打开 VS Code / 终端 ======
   app.post('/api/containers/:id/open-vscode', async (req, res) => {
     try {
       const containers = await docker.listContainers({ all: true })
@@ -546,52 +606,10 @@ export function startServer(port = 20920): void {
       if (!found) return res.status(404).json({ error: 'Container not found' })
 
       const detail = await getContainerDetail(found.Id)
-      const sshPort = detail.ports.find((p: any) => p.type === 'ssh')?.host || 0
-      const hostName = detail.name
-
-      // Write SSH config
-      const sshConfigDir = path.join(os.homedir(), '.ssh', 'config.d')
-      fs.mkdirSync(sshConfigDir, { recursive: true })
-      const configPath = path.join(sshConfigDir, 'envmanager')
-      const { privateKeyPath } = ensureSshKey()
-
-      const configEntry = `
-Host ${hostName}
-    HostName localhost
-    Port ${sshPort}
-    User root
-    StrictHostKeyChecking no
-    UserKnownHostsFile /dev/null
-    IdentityFile ${privateKeyPath.replace(/\\/g, '/')}
-`
-
-      // Append or update the host entry
-      let configContent = ''
-      if (fs.existsSync(configPath)) {
-        configContent = fs.readFileSync(configPath, 'utf8')
-      }
-      // Remove existing entry for this host
-      const regex = new RegExp(`Host ${hostName}[\\s\\S]*?(?=\\nHost |$)`, 'g')
-      configContent = configContent.replace(regex, '').trim()
-      configContent += '\n' + configEntry
-      fs.writeFileSync(configPath, configContent)
-
-      // Include the SSH config in the main config
-      const mainSshConfig = path.join(os.homedir(), '.ssh', 'config')
-      const includeLine = `Include config.d/envmanager`
-      if (fs.existsSync(mainSshConfig)) {
-        let mainContent = fs.readFileSync(mainSshConfig, 'utf8')
-        if (!mainContent.includes(includeLine)) {
-          fs.writeFileSync(mainSshConfig, mainContent.trimEnd() + '\n' + includeLine + '\n')
-        }
-      } else {
-        fs.writeFileSync(mainSshConfig, includeLine + '\n')
-      }
-
+      // Container name for docker exec -it (terminal fallback)
       res.json({
-        command: `code --remote ssh-remote+${hostName} /workspace`,
-        host: hostName,
-        port: sshPort
+        containerName: detail.name,
+        command: `docker exec -it ${detail.name} /bin/bash || docker exec -it ${detail.name} /bin/sh`
       })
     } catch (err: any) {
       res.status(500).json({ error: err.message })

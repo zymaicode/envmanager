@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { Loader2, Play, Square, Trash2, Terminal, Code, AlertTriangle, Plus } from 'lucide-react'
+import { Loader2, Play, Square, Trash2, Terminal, Globe, AlertTriangle, Plus } from 'lucide-react'
 import { useContainerStore } from '@/stores/container-store'
 import { formatBytes, formatUptime } from '@/lib/utils'
 import type { RunningContainer, ContainerStatus } from '@/types'
@@ -46,20 +46,6 @@ export function Workspace(): JSX.Element {
     setDeleteConfirm(null)
   }
 
-  const handleOpenVscode = async (containerId: string): Promise<void> => {
-    try {
-      const { api } = await import('@/lib/api')
-      const result = await api.openVscode(containerId)
-      if (window.electronAPI?.openVscode) {
-        await window.electronAPI.openVscode(result.command, '')
-      } else {
-        console.log('VS Code command:', result.command)
-      }
-    } catch (err) {
-      console.error('Failed to open VS Code:', err)
-    }
-  }
-
   const handleOpenTerminal = async (containerName: string): Promise<void> => {
     if (window.electronAPI?.openTerminal) {
       await window.electronAPI.openTerminal(containerName)
@@ -67,7 +53,6 @@ export function Workspace(): JSX.Element {
   }
 
   const handleCloneEnvironment = (container: RunningContainer): void => {
-    // Navigate to marketplace with pre-selected language/version
     navigate(`/marketplace?lang=${container.language}&version=${container.version}`)
   }
 
@@ -177,8 +162,8 @@ export function Workspace(): JSX.Element {
               onStop={() => stopContainer(c.id)}
               onStart={() => startContainer(c.id)}
               onDelete={() => setDeleteConfirm(c.id)}
-              onOpenVscode={() => handleOpenVscode(c.id)}
               onOpenTerminal={() => handleOpenTerminal(c.name)}
+              onOpenBrowser={c.ports.some((p) => p.type === 'web') ? () => window.open(`http://localhost:${c.ports.find((p) => p.type === 'web')!.host}`, '_blank') : null}
               onClone={() => handleCloneEnvironment(c)}
               onOpenLogs={async () => {
                 if (logsContainerId === c.id) {
@@ -221,8 +206,8 @@ export function Workspace(): JSX.Element {
                   onStop={() => stopContainer(c.id)}
                   onStart={() => startContainer(c.id)}
                   onDelete={() => setDeleteConfirm(c.id)}
-                  onOpenVscode={() => handleOpenVscode(c.id)}
                   onOpenTerminal={() => handleOpenTerminal(c.name)}
+                  onOpenBrowser={c.ports.some((p) => p.type === 'web') ? () => window.open(`http://localhost:${c.ports.find((p) => p.type === 'web')!.host}`, '_blank') : null}
                   onClone={() => handleCloneEnvironment(c)}
                 />
               ))}
@@ -283,8 +268,8 @@ function ContainerCard({
   onStop,
   onStart,
   onDelete,
-  onOpenVscode,
   onOpenTerminal,
+  onOpenBrowser,
   onOpenLogs,
   onClone
 }: {
@@ -294,8 +279,8 @@ function ContainerCard({
   onStop: () => void
   onStart: () => void
   onDelete: () => void
-  onOpenVscode: () => void
   onOpenTerminal: () => void
+  onOpenBrowser: (() => void) | null
   onOpenLogs: () => void
   onClone: () => void
 }): JSX.Element {
@@ -359,8 +344,10 @@ function ContainerCard({
       <div className="flex gap-1 flex-wrap">
         {container.status === 'running' ? (
           <>
-            <ActionBtn icon={<Code size={13} />} label="VS Code" onClick={onOpenVscode} />
             <ActionBtn icon={<Terminal size={13} />} label="终端" onClick={onOpenTerminal} />
+            {onOpenBrowser && (
+              <ActionBtn icon={<Globe size={13} />} label="浏览器" onClick={onOpenBrowser} />
+            )}
             <ActionBtn icon={<Plus size={13} />} label="克隆" onClick={onClone} />
             <ActionBtn icon={<Square size={13} />} label="停止" onClick={onStop} />
           </>
@@ -380,8 +367,8 @@ function ContainerTableRow({
   onStop,
   onStart,
   onDelete,
-  onOpenVscode,
   onOpenTerminal,
+  onOpenBrowser,
   onClone
 }: {
   container: RunningContainer
@@ -390,8 +377,8 @@ function ContainerTableRow({
   onStop: () => void
   onStart: () => void
   onDelete: () => void
-  onOpenVscode: () => void
   onOpenTerminal: () => void
+  onOpenBrowser: (() => void) | null
   onClone: () => void
 }): JSX.Element {
   return (
@@ -418,8 +405,8 @@ function ContainerTableRow({
         <div className="flex items-center justify-end gap-1">
           {container.status === 'running' ? (
             <>
-              <IconBtn icon={<Code size={14} />} onClick={onOpenVscode} title="VS Code" />
               <IconBtn icon={<Terminal size={14} />} onClick={onOpenTerminal} title="终端" />
+              {onOpenBrowser && <IconBtn icon={<Globe size={14} />} onClick={onOpenBrowser} title="浏览器" />}
               <IconBtn icon={<Plus size={14} />} onClick={onClone} title="克隆" />
               <IconBtn icon={<Square size={14} />} onClick={onStop} title="停止" />
             </>

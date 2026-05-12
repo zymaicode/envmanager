@@ -96,9 +96,17 @@ export interface CreateProgress {
 }
 
 export interface OpenVscodeResponse {
+  containerName: string
   command: string
-  host: string
-  port: number
+}
+
+export interface CreateProgress {
+  phase: string
+  containerId?: string
+  sshPort?: number
+  verifiedVersion?: string
+  error?: string
+  done: boolean
 }
 
 declare global {

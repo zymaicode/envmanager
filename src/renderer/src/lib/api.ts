@@ -46,6 +46,11 @@ export const api = {
     request<string>(`/api/containers/${id}/logs`),
   openVscode: (id: string) =>
     request<OpenVscodeResponse>(`/api/containers/${id}/open-vscode`, { method: 'POST' }),
+  execInContainer: (id: string, cmd: string[]) =>
+    request<{ output: string }>(`/api/containers/${id}/exec`, {
+      method: 'POST',
+      body: JSON.stringify({ cmd })
+    }),
 
   // Images
   getImages: () => request<LocalImage[]>('/api/images'),

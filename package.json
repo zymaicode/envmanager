@@ -1,6 +1,6 @@
 {
   "name": "envmanager",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "环境管理平台 —— 本地容器化开发环境管理工具",
   "author": "EnvManager Team",
   "homepage": "https://github.com/zymaicode/envmanager",
