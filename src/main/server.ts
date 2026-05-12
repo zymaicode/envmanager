@@ -334,6 +334,14 @@ export function startServer(port = 20920): void {
   // ====== 创建任务状态缓存 ======
   const creationTasks = new Map<string, { phase: string; containerId?: string; sshPort?: number; error?: string; done: boolean }>()
 
+  // Auto-cleanup: remove done/errored tasks after 60 seconds
+  setInterval(() => {
+    const now = Date.now()
+    for (const [key, task] of creationTasks) {
+      if (task.done) creationTasks.delete(key)
+    }
+  }, 60000)
+
   // ====== 创建容器 ======
   app.post('/api/containers', async (req, res) => {
     const taskId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6)
@@ -721,6 +729,15 @@ export function startServer(port = 20920): void {
       const envContainers = containers.filter((c) => c.Labels?.['envmanager.language'])
       const images = await docker.listImages({ all: true })
 
+      // Calculate host memory usage
+      let usedMemory = 0
+      try {
+        const allStats = await Promise.all(envContainers.map((c) =>
+          docker.getContainer(c.Id).stats({ stream: false }).catch(() => null)
+        ))
+        usedMemory = allStats.reduce((sum, s) => sum + (s?.memory_stats?.usage || 0), 0)
+      } catch { /* stats unavailable, keep 0 */ }
+
       res.json({
         docker: true,
         version: info.ServerVersion,
@@ -728,7 +745,7 @@ export function startServer(port = 20920): void {
         containersStopped: envContainers.filter((c) => c.State !== 'running').length,
         imagesCount: images.length,
         totalMemory: info.MemTotal || 0,
-        usedMemory: 0
+        usedMemory
       })
     } catch (err: any) {
       // 返回详细的错误信息，帮助诊断

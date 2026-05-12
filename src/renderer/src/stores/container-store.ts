@@ -13,8 +13,6 @@ interface ContainerStore {
   deleteContainer: (id: string) => Promise<void>
   stopAll: () => Promise<void>
   deleteAll: () => Promise<void>
-  addContainer: (c: RunningContainer) => void
-  removeContainer: (id: string) => void
 }
 
 export const useContainerStore = create<ContainerStore>((set, get) => ({
@@ -78,8 +76,5 @@ export const useContainerStore = create<ContainerStore>((set, get) => ({
     const { containers } = get()
     await Promise.all(containers.map((c) => api.deleteContainer(c.id)))
     set({ containers: [] })
-  },
-
-  addContainer: (c) => set((s) => ({ containers: [...s.containers, c] })),
-  removeContainer: (id) => set((s) => ({ containers: s.containers.filter((c) => c.id !== id) }))
+  }
 }))

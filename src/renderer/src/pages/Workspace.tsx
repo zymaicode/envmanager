@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { Loader2, Play, Square, Trash2, Terminal, Globe, AlertTriangle, Plus } from 'lucide-react'
+import { Loader2, Play, Square, Trash2, Terminal, Globe, AlertTriangle, Plus, Code } from 'lucide-react'
 import { useContainerStore } from '@/stores/container-store'
 import { formatBytes, formatUptime } from '@/lib/utils'
 import type { RunningContainer, ContainerStatus } from '@/types'
@@ -54,6 +54,12 @@ export function Workspace(): JSX.Element {
 
   const handleCloneEnvironment = (container: RunningContainer): void => {
     navigate(`/marketplace?lang=${container.language}&version=${container.version}`)
+  }
+
+  const getOpenBrowser = (container: RunningContainer): (() => void) | null => {
+    const webPort = container.ports.find((p) => p.type === 'web')
+    if (!webPort) return null
+    return () => window.open(`http://localhost:${webPort.host}`, '_blank')
   }
 
   return (
@@ -163,7 +169,7 @@ export function Workspace(): JSX.Element {
               onStart={() => startContainer(c.id)}
               onDelete={() => setDeleteConfirm(c.id)}
               onOpenTerminal={() => handleOpenTerminal(c.name)}
-              onOpenBrowser={c.ports.some((p) => p.type === 'web') ? () => window.open(`http://localhost:${c.ports.find((p) => p.type === 'web')!.host}`, '_blank') : null}
+              onOpenBrowser={getOpenBrowser(c)}
               onClone={() => handleCloneEnvironment(c)}
               onOpenLogs={async () => {
                 if (logsContainerId === c.id) {
@@ -207,7 +213,7 @@ export function Workspace(): JSX.Element {
                   onStart={() => startContainer(c.id)}
                   onDelete={() => setDeleteConfirm(c.id)}
                   onOpenTerminal={() => handleOpenTerminal(c.name)}
-                  onOpenBrowser={c.ports.some((p) => p.type === 'web') ? () => window.open(`http://localhost:${c.ports.find((p) => p.type === 'web')!.host}`, '_blank') : null}
+                  onOpenBrowser={getOpenBrowser(c)}
                   onClone={() => handleCloneEnvironment(c)}
                 />
               ))}
