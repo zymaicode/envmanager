@@ -43,6 +43,12 @@ app.whenReady().then(() => {
   startServer()
   createWindow()
 
+  // Auto updater (packaged builds only)
+  if (app.isPackaged) {
+    const { updateElectronApp } = require('update-electron-app')
+    updateElectronApp({ updateInterval: '1 hour' })
+  }
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow()

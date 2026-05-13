@@ -51,14 +51,23 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ cmd })
     }),
+  getContainerConfig: (id: string) =>
+    request<{ ports: any[]; mounts: any[]; language: string; version: string; image: string }>(`/api/containers/${id}/config`),
+  updateContainerConfig: (id: string, data: { ports?: { container: number; host: number }[]; envVars?: Record<string, string> }) =>
+    request<{ success: boolean; newContainerId?: string; message: string }>(`/api/containers/${id}/config`, {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    }),
 
   // Images
   getImages: () => request<LocalImage[]>('/api/images'),
   pullImage: (image: string) =>
-    request<{ success: boolean }>('/api/images/pull', {
+    request<{ taskId: string }>('/api/images/pull', {
       method: 'POST',
       body: JSON.stringify({ image })
     }),
+  getPullProgress: (taskId: string) =>
+    request<{ progress: string; done: boolean; layers: { id: string; status: string; progress: string }[]; error?: string }>(`/api/images/pull/${taskId}`),
   deleteImage: (id: string) =>
     request<{ success: boolean }>(`/api/images/${id}`, { method: 'DELETE' }),
   cleanupImages: () =>
@@ -67,5 +76,7 @@ export const api = {
     request<{ cached: boolean; image: string }>(`/api/images/check/${encodeURIComponent(image)}`),
 
   // System
-  getStatus: () => request<SystemStatus>('/api/status')
+  getStatus: () => request<SystemStatus>('/api/status'),
+  getDiskUsage: () =>
+    request<{ images: any; containers: any; volumes: any; buildCache: any; reclaimable: number }>('/api/system/disk-usage')
 }

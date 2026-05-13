@@ -1,4 +1,4 @@
-import { RotateCcw } from 'lucide-react'
+import { RotateCcw, Moon } from 'lucide-react'
 import { useSettingsStore } from '@/stores/settings-store'
 
 export function Settings(): JSX.Element {
@@ -85,6 +85,52 @@ export function Settings(): JSX.Element {
             className="w-full max-w-md rounded-lg border py-2 px-3 text-sm outline-none"
             style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg-card)', color: 'var(--color-text-primary)' }}
           />
+        </section>
+
+        {/* Auto Sleep */}
+        <section>
+          <h2 className="text-sm font-semibold mb-3" style={{ color: 'var(--color-text-primary)' }}>容器自动休眠</h2>
+          <p className="text-xs mb-3" style={{ color: 'var(--color-text-secondary)' }}>
+            闲置容器自动暂停以节省 CPU 和内存资源，连接时手动恢复
+          </p>
+          <div className="flex items-center gap-4 mb-3">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={settings.autoSleepEnabled}
+                onChange={(e) => updateSettings({ autoSleepEnabled: e.target.checked })}
+                className="rounded"
+                style={{ accentColor: 'var(--color-accent)' }}
+              />
+              <span className="text-sm" style={{ color: 'var(--color-text-primary)' }}>
+                启用自动休眠
+              </span>
+            </label>
+            {settings.autoSleepEnabled && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>闲置</span>
+                <select
+                  value={settings.autoSleepMinutes}
+                  onChange={(e) => updateSettings({ autoSleepMinutes: parseInt(e.target.value) })}
+                  className="rounded-lg border py-1.5 px-2 text-sm outline-none"
+                  style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}
+                >
+                  {[10, 30, 60, 120].map((m) => (
+                    <option key={m} value={m}>{m} 分钟</option>
+                  ))}
+                </select>
+                <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>后自动暂停</span>
+              </div>
+            )}
+          </div>
+          {settings.autoSleepEnabled && (
+            <div className="rounded-lg p-3" style={{ backgroundColor: 'var(--color-bg-primary)' }}>
+              <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                <Moon size={12} className="inline mr-1" />
+                CPU 使用低于 1% 持续 {settings.autoSleepMinutes} 分钟后，容器将自动暂停。重新访问时在工作台手动恢复即可。
+              </p>
+            </div>
+          )}
         </section>
 
         {/* Mirror URL */}

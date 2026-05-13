@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { Loader2, Play, Square, Trash2, Terminal, Globe, AlertTriangle, Plus, Code } from 'lucide-react'
+import { Loader2, Play, Square, Trash2, Terminal, Globe, AlertTriangle, Plus, Code, Edit3 } from 'lucide-react'
 import { useContainerStore } from '@/stores/container-store'
 import { formatBytes, formatUptime } from '@/lib/utils'
 import type { RunningContainer, ContainerStatus } from '@/types'
@@ -15,10 +15,19 @@ export function Workspace(): JSX.Element {
   const [deleteAllConfirm, setDeleteAllConfirm] = useState(false)
   const [logsContainerId, setLogsContainerId] = useState<string | null>(null)
   const [logs, setLogs] = useState('')
+  const [diskUsage, setDiskUsage] = useState<{ reclaimable: number } | null>(null)
 
   useEffect(() => {
     fetchContainers()
     fetchStatus()
+    const loadDisk = async (): Promise<void> => {
+      try {
+        const { api: apiModule } = await import('@/lib/api')
+        const usage = await apiModule.getDiskUsage()
+        setDiskUsage(usage)
+      } catch { /* ignore */ }
+    }
+    loadDisk()
   }, [fetchContainers, fetchStatus])
 
   const statusLabel: Record<ContainerStatus, string> = {
@@ -54,6 +63,35 @@ export function Workspace(): JSX.Element {
 
   const handleCloneEnvironment = (container: RunningContainer): void => {
     navigate(`/marketplace?lang=${container.language}&version=${container.version}`)
+  }
+
+  const [editContainer, setEditContainer] = useState<RunningContainer | null>(null)
+  const [editPorts, setEditPorts] = useState<{ container: number; host: number }[]>([])
+  const [editSaving, setEditSaving] = useState(false)
+
+  const handleOpenEdit = async (container: RunningContainer): Promise<void> => {
+    setEditContainer(container)
+    try {
+      const { api: apiModule } = await import('@/lib/api')
+      const config = await apiModule.getContainerConfig(container.id)
+      setEditPorts(config.ports.map((p: any) => ({ container: p.container, host: p.host })))
+    } catch {
+      setEditPorts(container.ports.map((p) => ({ container: p.container, host: p.host })))
+    }
+  }
+
+  const handleSaveEdit = async (): Promise<void> => {
+    if (!editContainer) return
+    setEditSaving(true)
+    try {
+      const { api: apiModule } = await import('@/lib/api')
+      await apiModule.updateContainerConfig(editContainer.id, { ports: editPorts })
+      await fetchContainers()
+      setEditContainer(null)
+    } catch (err) {
+      console.error('Config update failed:', err)
+    }
+    setEditSaving(false)
   }
 
   const getOpenBrowser = (container: RunningContainer): (() => void) | null => {
@@ -98,6 +136,37 @@ export function Workspace(): JSX.Element {
         <StatCard label="异常" value={dead} color="var(--color-status-red)" />
         <StatCard label="总计" value={containers.length} color="var(--color-accent)" />
       </div>
+
+      {/* Disk Usage */}
+      {diskUsage && diskUsage.reclaimable > 0 && (
+        <div className="rounded-xl border p-4 mb-4 flex items-center justify-between" style={{ backgroundColor: 'var(--color-bg-card)', borderColor: 'var(--color-border)' }}>
+          <div>
+            <span className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>
+              可回收空间
+            </span>
+            <span className="text-sm ml-2" style={{ color: 'var(--color-text-secondary)' }}>
+              {formatBytes(diskUsage.reclaimable)}
+            </span>
+            <span className="text-xs ml-3" style={{ color: 'var(--color-text-muted)' }}>
+              来自未使用的镜像和构建缓存
+            </span>
+          </div>
+          <button
+            onClick={async () => {
+              try {
+                const { api: apiModule } = await import('@/lib/api')
+                await apiModule.cleanupImages()
+                await fetchContainers()
+                setDiskUsage(null)
+              } catch { /* ignore */ }
+            }}
+            className="rounded-lg border px-3 py-1.5 text-xs transition-colors hover:bg-black/5"
+            style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+          >
+            一键清理
+          </button>
+        </div>
+      )}
 
       {/* Global Actions */}
       {containers.length > 0 && (
@@ -171,6 +240,7 @@ export function Workspace(): JSX.Element {
               onOpenTerminal={() => handleOpenTerminal(c.name)}
               onOpenBrowser={getOpenBrowser(c)}
               onClone={() => handleCloneEnvironment(c)}
+              onEdit={() => handleOpenEdit(c)}
               onOpenLogs={async () => {
                 if (logsContainerId === c.id) {
                   setLogsContainerId(null)
@@ -220,6 +290,62 @@ export function Workspace(): JSX.Element {
             </tbody>
           </table>
         </div>
+      )}
+
+      {/* Container Config Edit Dialog */}
+      {editContainer && (
+        <>
+          <div className="fixed inset-0 z-50 bg-black/20" onClick={() => setEditContainer(null)} />
+          <div className="fixed inset-0 z-50 flex items-center justify-center">
+            <div className="w-[500px] max-h-[80vh] overflow-y-auto rounded-xl p-6 shadow-2xl" style={{ backgroundColor: 'var(--color-bg-card)' }}>
+              <h3 className="text-lg font-semibold mb-2" style={{ color: 'var(--color-text-primary)' }}>
+                编辑容器: {editContainer.name}
+              </h3>
+              <p className="text-xs mb-6" style={{ color: 'var(--color-text-secondary)' }}>
+                修改端口映射。更改端口会停止容器并重新创建（保留数据和卷）。
+              </p>
+
+              <div className="space-y-3 mb-6">
+                <h4 className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>端口映射</h4>
+                {editPorts.map((p, idx) => (
+                  <div key={idx} className="flex items-center gap-3">
+                    <span className="text-xs w-20" style={{ color: 'var(--color-text-secondary)' }}>容器端口 {p.container}</span>
+                    <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>→ 宿主机</span>
+                    <input
+                      type="number"
+                      value={p.host}
+                      onChange={(e) => {
+                        const updated = [...editPorts]
+                        updated[idx] = { ...p, host: parseInt(e.target.value) || p.host }
+                        setEditPorts(updated)
+                      }}
+                      className="w-24 rounded-lg border py-1.5 px-3 text-sm outline-none"
+                      style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}
+                    />
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => setEditContainer(null)}
+                  className="rounded-lg border px-4 py-2 text-sm"
+                  style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleSaveEdit}
+                  disabled={editSaving}
+                  className="rounded-lg px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                  style={{ backgroundColor: 'var(--color-accent)' }}
+                >
+                  {editSaving ? '保存中...' : '保存配置'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
       )}
 
       {/* Delete Confirm Dialog */}
@@ -277,7 +403,8 @@ function ContainerCard({
   onOpenTerminal,
   onOpenBrowser,
   onOpenLogs,
-  onClone
+  onClone,
+  onEdit
 }: {
   container: RunningContainer
   statusLabel: Record<ContainerStatus, string>
@@ -289,6 +416,7 @@ function ContainerCard({
   onOpenBrowser: (() => void) | null
   onOpenLogs: () => void
   onClone: () => void
+  onEdit: () => void
 }): JSX.Element {
   const iconMap: Record<string, string> = { python: '🐍', node: '⬢', java: '☕', go: '🔵', rust: '🦀', cpp: '⚙️' }
   return (
@@ -354,6 +482,7 @@ function ContainerCard({
             {onOpenBrowser && (
               <ActionBtn icon={<Globe size={13} />} label="浏览器" onClick={onOpenBrowser} />
             )}
+            <ActionBtn icon={<Edit3 size={13} />} label="编辑" onClick={onEdit} />
             <ActionBtn icon={<Plus size={13} />} label="克隆" onClick={onClone} />
             <ActionBtn icon={<Square size={13} />} label="停止" onClick={onStop} />
           </>

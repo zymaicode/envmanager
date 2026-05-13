@@ -62,13 +62,28 @@ export function ImageManager(): JSX.Element {
     setCleanupConfirm(false)
   }
 
+  const [pullProgress, setPullProgress] = useState<{ taskId: string; layers: { id: string; status: string; progress: string }[] } | null>(null)
+
   const handleQuickDownload = async (image: string): Promise<void> => {
     setDownloading(image)
     try {
-      await pullImage(image)
+      const { taskId } = await api.pullImage(image)
+      setPullProgress({ taskId, layers: [] })
+
+      // Poll every 500ms
+      for (let i = 0; i < 600; i++) {
+        await new Promise((r) => setTimeout(r, 500))
+        const progress = await api.getPullProgress(taskId)
+        setPullProgress({ taskId, layers: progress.layers || [] })
+        if (progress.done) {
+          if (progress.error) throw new Error(progress.error)
+          break
+        }
+      }
       await fetchImages()
     } finally {
       setDownloading(null)
+      setPullProgress(null)
     }
   }
 
@@ -147,6 +162,23 @@ export function ImageManager(): JSX.Element {
           })}
         </div>
       </div>
+
+      {/* Pull Progress */}
+      {pullProgress && pullProgress.layers.length > 0 && (
+        <div className="mb-4 rounded-xl border p-4" style={{ borderColor: 'var(--color-accent)', backgroundColor: 'var(--color-bg-card)' }}>
+          <h3 className="text-xs font-medium mb-3 flex items-center gap-2" style={{ color: 'var(--color-text-primary)' }}>
+            <Loader2 size={12} className="animate-spin" /> 正在下载...
+          </h3>
+          <div className="space-y-1 max-h-40 overflow-y-auto">
+            {pullProgress.layers.map((layer, idx) => (
+              <div key={idx} className="flex items-center justify-between text-xs py-0.5">
+                <span className="truncate max-w-[200px]" style={{ color: 'var(--color-text-secondary)' }}>{layer.id}</span>
+                <span style={{ color: 'var(--color-text-muted)' }}>{layer.status} {layer.progress}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 本地镜像列表 */}
       {loading ? (

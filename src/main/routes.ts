@@ -9,6 +9,53 @@ export function registerRoutes(app: express.Express): void {
   // ====== 创建任务状态缓存 ======
   const creationTasks = new Map<string, { phase: string; containerId?: string; sshPort?: number; verifiedVersion?: string; error?: string; done: boolean }>()
 
+  // ====== 容器自动休眠监控 ======
+  const containerLastActivity = new Map<string, number>()
+  let autoSleepInterval: ReturnType<typeof setInterval> | null = null
+
+  app.post('/api/system/auto-sleep/config', (req, res) => {
+    const { enabled, minutes } = req.body as { enabled: boolean; minutes: number }
+    if (autoSleepInterval) { clearInterval(autoSleepInterval); autoSleepInterval = null }
+
+    if (enabled && minutes > 0) {
+      autoSleepInterval = setInterval(async () => {
+        try {
+          const containers = await docker.listContainers({ all: true })
+          const running = containers.filter((c) => c.State === 'running' && c.Labels?.['envmanager.language'])
+          const threshold = minutes * 60 * 1000
+
+          for (const info of running) {
+            const c = docker.getContainer(info.Id)
+            try {
+              const stats = await c.stats({ stream: false })
+              const cpuDelta = stats.cpu_stats.cpu_usage.total_usage - stats.precpu_stats.cpu_usage.total_usage
+              const systemDelta = stats.cpu_stats.system_cpu_usage - stats.precpu_stats.system_cpu_usage
+              const cpuPercent = systemDelta > 0 ? (cpuDelta / systemDelta) * (stats.cpu_stats.online_cpus || 1) * 100 : 0
+
+              const now = Date.now()
+              if (cpuPercent < 1.0) {
+                // Low CPU: mark idle
+                const firstIdle = containerLastActivity.get(info.Id) || now
+                if (now - firstIdle > threshold) {
+                  console.log(`[EnvManager] Auto-sleep: pausing ${info.Names[0]}`)
+                  await c.pause()
+                  containerLastActivity.delete(info.Id)
+                } else if (!containerLastActivity.has(info.Id)) {
+                  containerLastActivity.set(info.Id, now)
+                }
+              } else {
+                containerLastActivity.delete(info.Id)
+              }
+            } catch { /* skip individual container errors */ }
+          }
+        } catch { /* monitoring loop error, retry next interval */ }
+      }, 30000) // Check every 30 seconds
+      console.log(`[EnvManager] Auto-sleep enabled: ${minutes} min idle threshold`)
+    }
+
+    res.json({ success: true, enabled, minutes })
+  })
+
   // Auto-cleanup: remove done tasks after 60 seconds
   setInterval(() => {
     for (const [key, task] of creationTasks) {
@@ -157,6 +204,101 @@ export function registerRoutes(app: express.Express): void {
     res.json(task)
   })
 
+  // ====== 更新容器配置（停止 → 重建） ======
+  app.put('/api/containers/:id/config', async (req, res) => {
+    try {
+      const containers = await docker.listContainers({ all: true })
+      const found = containers.find((c) => c.Id.startsWith(req.params.id))
+      if (!found) return res.status(404).json({ error: 'Container not found' })
+
+      const detail = await getContainerDetail(found.Id)
+      const { ports: newPorts, envVars } = req.body as { ports?: { container: number; host: number }[]; envVars?: Record<string, string> }
+
+      // Apply env vars via docker exec (can't change on running container, only add)
+      if (envVars && Object.keys(envVars).length > 0) {
+        const c = docker.getContainer(found.Id)
+        for (const [key, value] of Object.entries(envVars)) {
+          try {
+            const exec = await c.exec({ Cmd: ['/bin/sh', '-c', `export ${key}='${value}'`], AttachStdout: false, AttachStderr: false })
+            await exec.start({ Detach: true })
+          } catch { /* best effort */ }
+        }
+      }
+
+      // Port changes require stop → recreate
+      if (newPorts && newPorts.length > 0) {
+        const c = docker.getContainer(found.Id)
+        const oldInfo = await c.inspect()
+        const wasRunning = oldInfo.State.Running
+
+        // Commit current state as a temporary image
+        if (wasRunning) await c.stop()
+        const oldConfig = oldInfo.Config
+        const oldHostConfig = oldInfo.HostConfig || {}
+
+        // Build new port bindings
+        const portBindings: Record<string, Array<{ HostPort: string }>> = {}
+        for (const p of newPorts) {
+          portBindings[`${p.container}/tcp`] = [{ HostPort: String(p.host) }]
+        }
+
+        // Create replacement container with same settings but new ports
+        const replacement = await docker.createContainer({
+          Image: oldConfig.Image,
+          name: oldInfo.Name.replace(/^\//, ''),
+          Tty: oldConfig.Tty,
+          OpenStdin: oldConfig.OpenStdin,
+          WorkingDir: oldConfig.WorkingDir,
+          Env: oldConfig.Env,
+          Cmd: oldConfig.Cmd,
+          HostConfig: {
+            ...oldHostConfig,
+            PortBindings: portBindings,
+            Binds: oldHostConfig.Binds || [],
+            RestartPolicy: oldHostConfig.RestartPolicy || { Name: 'unless-stopped' }
+          },
+          Labels: oldConfig.Labels || {},
+          Volumes: oldConfig.Volumes
+        })
+
+        // Remove old container
+        await c.remove({ force: true })
+
+        // Start new one
+        if (wasRunning) await replacement.start()
+
+        res.json({
+          success: true,
+          newContainerId: replacement.id.substring(0, 12),
+          message: '端口配置已更新'
+        })
+      } else {
+        res.json({ success: true, message: '配置已更新' })
+      }
+    } catch (err: any) {
+      res.status(500).json({ error: err.message })
+    }
+  })
+
+  // ====== 获取容器可编辑配置 ======
+  app.get('/api/containers/:id/config', async (req, res) => {
+    try {
+      const containers = await docker.listContainers({ all: true })
+      const found = containers.find((c) => c.Id.startsWith(req.params.id))
+      if (!found) return res.status(404).json({ error: 'Container not found' })
+      const detail = await getContainerDetail(found.Id)
+      res.json({
+        ports: detail.ports,
+        mounts: detail.mounts,
+        language: detail.language,
+        version: detail.version,
+        image: detail.image
+      })
+    } catch (err: any) {
+      res.status(500).json({ error: err.message })
+    }
+  })
+
   // ====== 停止 / 启动 / 销毁 ======
   const containerAction = (action: 'stop' | 'start' | 'remove-force') =>
     async (req: express.Request, res: express.Response) => {
@@ -265,16 +407,64 @@ export function registerRoutes(app: express.Express): void {
     }
   })
 
-  // ====== 镜像操作 ======
+  // ====== 镜像拉取（异步 + 进度） ======
+  const pullTasks = new Map<string, { progress: string; done: boolean; layers: { id: string; status: string; progress: string }[]; error?: string }>()
+
   app.post('/api/images/pull', async (req, res) => {
+    const { image } = req.body as { image: string }
+    if (!image) return res.status(400).json({ error: 'Image name required' })
+
+    const taskId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6)
+    pullTasks.set(taskId, { progress: '正在连接...', done: false, layers: [] })
+    res.json({ taskId })
+
     try {
-      const { image } = req.body
-      if (!image) return res.status(400).json({ error: 'Image name required' })
-      await docker.pull(image)
-      res.json({ success: true, message: 'Image pulled successfully' })
+      const stream = await docker.pull(image)
+      const layers: { id: string; status: string; progress: string }[] = []
+      const layerMap = new Map<string, { status: string; progress: string }>()
+
+      await new Promise<void>((resolve, reject) => {
+        docker.modem.followProgress(
+          stream,
+          (err: Error | null, result: any[]) => {
+            if (err) return reject(err)
+            resolve()
+          },
+          (event: any) => {
+            if (!pullTasks.has(taskId)) return
+            const id = event.id || ''
+            const status = event.status || ''
+            const progress = event.progress || ''
+            const layerDetail = event.progressDetail || {}
+
+            if (id) {
+              layerMap.set(id, { status, progress })
+              const layersArr = Array.from(layerMap.entries()).map(([k, v]) => ({ id: k, status: v.status, progress: v.progress }))
+              pullTasks.set(taskId, {
+                progress: `${status} ${id}: ${progress}`,
+                done: false,
+                layers: layersArr
+              })
+            } else {
+              pullTasks.set(taskId, { progress: status, done: false, layers: Array.from(layerMap.entries()).map(([k, v]) => ({ id: k, status: v.status, progress: v.progress })) })
+            }
+          }
+        )
+      })
+
+      pullTasks.set(taskId, { progress: '拉取完成', done: true, layers: Array.from(layerMap.entries()).map(([k, v]) => ({ id: k, status: v.status, progress: v.progress })) })
     } catch (err: any) {
-      res.status(500).json({ error: err.message })
+      pullTasks.set(taskId, { progress: `拉取失败: ${err.message}`, done: true, layers: [], error: err.message })
     }
+
+    // Cleanup after 2 min
+    setTimeout(() => { pullTasks.delete(taskId) }, 120000)
+  })
+
+  app.get('/api/images/pull/:taskId', (req, res) => {
+    const task = pullTasks.get(req.params.taskId)
+    if (!task) return res.status(404).json({ error: 'Task not found' })
+    res.json(task)
   })
 
   app.delete('/api/images/:id', async (req, res) => {
@@ -314,6 +504,37 @@ export function registerRoutes(app: express.Express): void {
       platform: process.platform,
       dockerHost: process.env['DOCKER_HOST'] || null
     })
+  })
+
+  // ====== 磁盘空间使用 ======
+  app.get('/api/system/disk-usage', async (_req, res) => {
+    try {
+      const result = await (docker as any).df()
+      res.json({
+        images: {
+          total: result.Images?.length || 0,
+          active: result.Images?.filter((i: any) => i.Containers > 0).length || 0,
+          size: result.LayersSize || 0
+        },
+        containers: {
+          total: result.Containers?.length || 0,
+          size: result.Containers?.reduce((sum: number, c: any) => sum + (c.SizeRw || 0), 0) || 0
+        },
+        volumes: {
+          total: result.Volumes?.length || 0,
+          active: result.Volumes?.filter((v: any) => v.UsageData?.Size > 0).length || 0,
+          size: result.Volumes?.reduce((sum: number, v: any) => sum + (v.UsageData?.Size || 0), 0) || 0
+        },
+        buildCache: {
+          items: result.BuildCache?.length || 0,
+          size: result.BuildCache?.reduce((sum: number, b: any) => sum + (b.Size || 0), 0) || 0
+        },
+        reclaimable: result.BuildCache?.reduce((sum: number, b: any) => sum + (b.Size || 0), 0)
+          + result.Images?.filter((i: any) => i.Containers === 0).reduce((sum: number, i: any) => sum + (i.SharedSize || 0), 0) || 0
+      })
+    } catch (err: any) {
+      res.status(500).json({ error: err.message })
+    }
   })
 
   // ====== 系统状态 ======

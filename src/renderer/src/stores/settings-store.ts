@@ -8,6 +8,8 @@ export interface Settings {
   mirrorUrl: string
   autoCleanup: 'never' | 'stop' | 'destroy' | 'stop-all'
   vscodePath: string
+  autoSleepEnabled: boolean
+  autoSleepMinutes: number
 }
 
 interface SettingsStore {
@@ -23,7 +25,9 @@ const defaults: Settings = {
   dockerSocketPath: '',
   mirrorUrl: '',
   autoCleanup: 'never',
-  vscodePath: ''
+  vscodePath: '',
+  autoSleepEnabled: false,
+  autoSleepMinutes: 30
 }
 
 function loadSettings(): Settings {
