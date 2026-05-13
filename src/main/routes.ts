@@ -211,19 +211,7 @@ export function registerRoutes(app: express.Express): void {
       const found = containers.find((c) => c.Id.startsWith(req.params.id))
       if (!found) return res.status(404).json({ error: 'Container not found' })
 
-      const detail = await getContainerDetail(found.Id)
-      const { ports: newPorts, envVars } = req.body as { ports?: { container: number; host: number }[]; envVars?: Record<string, string> }
-
-      // Apply env vars via docker exec (can't change on running container, only add)
-      if (envVars && Object.keys(envVars).length > 0) {
-        const c = docker.getContainer(found.Id)
-        for (const [key, value] of Object.entries(envVars)) {
-          try {
-            const exec = await c.exec({ Cmd: ['/bin/sh', '-c', `export ${key}='${value}'`], AttachStdout: false, AttachStderr: false })
-            await exec.start({ Detach: true })
-          } catch { /* best effort */ }
-        }
-      }
+      const { ports: newPorts } = req.body as { ports?: { container: number; host: number }[] }
 
       // Port changes require stop → recreate
       if (newPorts && newPorts.length > 0) {
@@ -420,7 +408,6 @@ export function registerRoutes(app: express.Express): void {
 
     try {
       const stream = await docker.pull(image)
-      const layers: { id: string; status: string; progress: string }[] = []
       const layerMap = new Map<string, { status: string; progress: string }>()
 
       await new Promise<void>((resolve, reject) => {
@@ -507,9 +494,10 @@ export function registerRoutes(app: express.Express): void {
   })
 
   // ====== 磁盘空间使用 ======
+  // dockerode does not export df() in its type definitions, but the method exists on the modem
   app.get('/api/system/disk-usage', async (_req, res) => {
     try {
-      const result = await (docker as any).df()
+      const result = await (docker as unknown as { df: () => Promise<any> }).df()
       res.json({
         images: {
           total: result.Images?.length || 0,

@@ -70,15 +70,20 @@ export function ImageManager(): JSX.Element {
       const { taskId } = await api.pullImage(image)
       setPullProgress({ taskId, layers: [] })
 
-      // Poll every 500ms
-      for (let i = 0; i < 600; i++) {
-        await new Promise((r) => setTimeout(r, 500))
+      // Poll every 1s, timeout 5min
+      let timedOut = false
+      for (let i = 0; i < 300; i++) {
+        await new Promise((r) => setTimeout(r, 1000))
         const progress = await api.getPullProgress(taskId)
         setPullProgress({ taskId, layers: progress.layers || [] })
         if (progress.done) {
           if (progress.error) throw new Error(progress.error)
           break
         }
+      }
+      if (!pullProgress?.layers?.length) {
+        timedOut = true
+        throw new Error('下载超时，请检查网络后重试')
       }
       await fetchImages()
     } finally {
