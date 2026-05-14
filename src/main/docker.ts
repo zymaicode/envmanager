@@ -4,34 +4,52 @@ import os from 'os'
 import fs from 'fs'
 
 // ====== Docker 连接方式自动探测 ======
-export function detectDockerConnection(): { socketPath?: string; host?: string; port?: number } {
+// 用实际 API 调用来验证连通性，而非文件系统检测（Named Pipe 不是文件）
+async function probeConnection(config: { socketPath?: string; host?: string; port?: number }): Promise<boolean> {
+  try {
+    const testDocker = new Docker(config)
+    const info = await testDocker.info()
+    console.log(`[EnvManager] Docker probe OK: ${info.ServerVersion} ${config.socketPath || config.host || 'default'}`)
+    return true
+  } catch {
+    return false
+  }
+}
+
+export async function detectDockerConnection(): Promise<{ socketPath?: string; host?: string; port?: number }> {
+  // 1. 默认连接（dockerode 内部自动检测 DOCKER_HOST / docker context）
+  if (await probeConnection({})) {
+    console.log('[EnvManager] Docker: default connection OK')
+    return {}
+  }
+
+  // 2. TCP 连接（通过 DOCKER_HOST 环境变量明确指定）
   const envHost = process.env['DOCKER_HOST']
   if (envHost) {
-    console.log(`[EnvManager] Docker: using DOCKER_HOST = ${envHost}`)
-    const match = envHost.match(/^(tcp:\/\/)?(.+):(\d+)$/)
-    if (match) {
-      return { host: match[2], port: parseInt(match[3]) }
+    const tcpMatch = envHost.match(/^tcp:\/\/(.+):(\d+)$/)
+    if (tcpMatch) {
+      const config = { host: tcpMatch[1], port: parseInt(tcpMatch[2]) }
+      if (await probeConnection(config)) return config
     }
-    return { socketPath: envHost.replace('unix://', '') }
+    const unixPath = envHost.replace('unix://', '')
+    if (unixPath && (await probeConnection({ socketPath: unixPath }))) {
+      return { socketPath: unixPath }
+    }
   }
 
+  // 3. Windows Named Pipe（Docker Desktop 两种）
   if (process.platform === 'win32') {
-    const windowsPipes = [
-      '//./pipe/docker_engine',
-      '//./pipe/dockerDesktopLinuxEngine',
-      '//./pipe/DockerDesktopLinuxEngine'
-    ]
-    for (const pipe of windowsPipes) {
-      try {
-        if (fs.statSync(pipe)) {
-          console.log(`[EnvManager] Docker: using named pipe ${pipe}`)
-          return { socketPath: pipe }
-        }
-      } catch { /* pipe not available */ }
+    const pipes = ['//./pipe/docker_engine', '//./pipe/dockerDesktopLinuxEngine']
+    for (const p of pipes) {
+      if (await probeConnection({ socketPath: p })) {
+        console.log(`[EnvManager] Docker: connected via ${p}`)
+        return { socketPath: p }
+      }
     }
   }
 
-  const unixSockets = [
+  // 4. Unix socket 系列（macOS / Linux 的各种 Docker 发行版）
+  const unixCandidates = [
     '/var/run/docker.sock',
     path.join(os.homedir(), '.docker', 'run', 'docker.sock'),
     path.join(os.homedir(), '.colima', 'default', 'docker.sock'),
@@ -39,19 +57,44 @@ export function detectDockerConnection(): { socketPath?: string; host?: string; 
     path.join(os.homedir(), '.rd', 'docker.sock'),
     '/run/user/1000/podman/podman.sock',
   ]
-  for (const sock of unixSockets) {
+  for (const sock of unixCandidates) {
     if (fs.existsSync(sock)) {
-      console.log(`[EnvManager] Docker: using unix socket ${sock}`)
-      return { socketPath: sock }
+      if (await probeConnection({ socketPath: sock })) {
+        console.log(`[EnvManager] Docker: connected via ${sock}`)
+        return { socketPath: sock }
+      }
     }
   }
 
-  console.log('[EnvManager] Docker: using default connection (dockerode auto-detect)')
+  console.error('[EnvManager] Docker: ALL connection methods failed')
   return {}
 }
 
-const dockerConfig = detectDockerConnection()
+// 同步初始化：先创建默认实例，启动时 probe 在后台完成
+let dockerConfig: { socketPath?: string; host?: string; port?: number } = {}
 export const docker = new Docker(dockerConfig)
+
+// 启动后台探测，成功后切换连接
+export async function initDockerConnection(): Promise<boolean> {
+  const config = await detectDockerConnection()
+  if (Object.keys(config).length > 0) {
+    dockerConfig = config
+    // 重新创建 docker 实例（dockerode 不暴露 setSocketPath，用 modem.reconnect 不可靠）
+    // 实际方案：修改 docker 实例的 modem.socketPath
+    ;(docker as any).modem.socketPath = config.socketPath
+    ;(docker as any).modem.host = config.host
+    ;(docker as any).modem.port = config.port
+  }
+  // 最终验证
+  try {
+    await docker.info()
+    console.log('[EnvManager] Docker: connected successfully')
+    return true
+  } catch (err: any) {
+    console.error('[EnvManager] Docker: connection failed:', err.message)
+    return false
+  }
+}
 
 // ====== 辅助函数：解析 Docker 容器数据 ======
 export function mapContainer(info: Docker.ContainerInfo) {
@@ -135,14 +178,12 @@ export async function getContainerDetail(containerId: string) {
   }
 }
 
-/** 端口类型分类：SSH / Web 开发端口 / 自定义 */
 function classifyPort(port: number): 'ssh' | 'web' | 'custom' {
   if (port === 22) return 'ssh'
   if ([3000, 8080, 5000, 8000, 9000].includes(port)) return 'web'
   return 'custom'
 }
 
-/** 探测空闲端口 */
 export async function findFreePort(start: number, end: number): Promise<number> {
   const net = await import('net')
   for (let port = start; port <= end; port++) {
@@ -159,7 +200,6 @@ export async function findFreePort(start: number, end: number): Promise<number> 
   throw new Error(`No free port found in range ${start}-${end}`)
 }
 
-/** 容器运行时版本检测命令 */
 export const VERSION_COMMANDS: Record<string, string> = {
   python: 'python --version 2>&1 || python3 --version 2>&1',
   node: 'node --version 2>&1',
@@ -173,11 +213,6 @@ export const VERSION_COMMANDS: Record<string, string> = {
   mongo: 'mongosh --version 2>&1 || mongod --version 2>&1 | head -1'
 }
 
-/**
- * 转换 Windows 路径为容器内挂载路径。
- * 默认使用 WSL2 路径映射 (C:\ → /mnt/c/)。
- * 未来可扩展：通过 wsl -d <distro> wslpath -a <winpath> 探测真实 WSL 路径。
- */
 export function normalizeProjectPath(rawPath: string): string {
   if (process.platform === 'win32') {
     return rawPath.replace(/^([A-Z]):/, (_, drive) => `/mnt/${drive.toLowerCase()}`).replace(/\\/g, '/')

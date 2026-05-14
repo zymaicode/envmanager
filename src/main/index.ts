@@ -38,9 +38,9 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   registerIpcHandlers()
-  startServer()
+  await startServer()
   createWindow()
 
   // Auto updater (packaged builds only)
