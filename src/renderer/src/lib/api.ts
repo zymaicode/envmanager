@@ -77,6 +77,8 @@ export const api = {
 
   // System
   getStatus: () => request<SystemStatus>('/api/status'),
+  reconnectDocker: () =>
+    request<{ success: boolean; version?: string; error?: string }>('/api/system/reconnect', { method: 'POST' }),
   getDiskUsage: () =>
     request<{ images: any; containers: any; volumes: any; buildCache: any; reclaimable: number }>('/api/system/disk-usage')
 }

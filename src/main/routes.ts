@@ -2,7 +2,7 @@ import express from 'express'
 import Docker from 'dockerode'
 import path from 'path'
 import os from 'os'
-import { docker, mapContainer, getContainerDetail, findFreePort, VERSION_COMMANDS, normalizeProjectPath } from './docker'
+import { docker, mapContainer, getContainerDetail, findFreePort, VERSION_COMMANDS, normalizeProjectPath, initDockerConnection } from './docker'
 import { allTemplates, databaseTemplates } from './templates'
 
 export function registerRoutes(app: express.Express): void {
@@ -482,6 +482,21 @@ export function registerRoutes(app: express.Express): void {
       res.json({ cached: existing.length > 0, image: imageName })
     } catch (err: any) {
       res.status(500).json({ error: err.message })
+    }
+  })
+
+  // ====== 重新连接 Docker ======
+  app.post('/api/system/reconnect', async (_req, res) => {
+    try {
+      const ok = await initDockerConnection()
+      if (ok) {
+        const info = await docker.info()
+        res.json({ success: true, version: info.ServerVersion })
+      } else {
+        res.json({ success: false, error: '所有连接方式均失败，请检查 Docker 是否运行' })
+      }
+    } catch (err: any) {
+      res.json({ success: false, error: err.message })
     }
   })
 
