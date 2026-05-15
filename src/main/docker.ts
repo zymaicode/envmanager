@@ -70,30 +70,31 @@ export async function detectDockerConnection(): Promise<{ socketPath?: string; h
   return {}
 }
 
-// 同步初始化：先创建默认实例，启动时 probe 在后台完成
-let dockerConfig: { socketPath?: string; host?: string; port?: number } = {}
-export const docker = new Docker(dockerConfig)
+// 全局 docker 实例（export 给 routes 等模块引用）
+// 初始用 dockerode 默认连接，initDockerConnection 会重新创建正确连接的实例
+export let docker = new Docker()
 
-// 启动后台探测，成功后切换连接
-export async function initDockerConnection(): Promise<boolean> {
+// 启动后台探测，成功后替换全局 docker 实例
+// Docker Desktop 启动后需要一些时间就绪，带重试
+export async function initDockerConnection(maxRetries = 3): Promise<boolean> {
   const config = await detectDockerConnection()
-  if (Object.keys(config).length > 0) {
-    dockerConfig = config
-    // 重新创建 docker 实例（dockerode 不暴露 setSocketPath，用 modem.reconnect 不可靠）
-    // 实际方案：修改 docker 实例的 modem.socketPath
-    ;(docker as any).modem.socketPath = config.socketPath
-    ;(docker as any).modem.host = config.host
-    ;(docker as any).modem.port = config.port
+  docker = new Docker(Object.keys(config).length > 0 ? config : {})
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const info = await docker.info()
+      console.log(`[EnvManager] Docker connected: v${info.ServerVersion}`)
+      return true
+    } catch (err: any) {
+      console.error(`[EnvManager] Docker attempt ${attempt}/${maxRetries} failed: ${err.message}`)
+      if (attempt < maxRetries) {
+        console.log('[EnvManager] Retrying in 3s...')
+        await new Promise((r) => setTimeout(r, 3000))
+      }
+    }
   }
-  // 最终验证
-  try {
-    await docker.info()
-    console.log('[EnvManager] Docker: connected successfully')
-    return true
-  } catch (err: any) {
-    console.error('[EnvManager] Docker: connection failed:', err.message)
-    return false
-  }
+  console.error('[EnvManager] Docker: all reconnection attempts failed')
+  return false
 }
 
 // ====== 辅助函数：解析 Docker 容器数据 ======
