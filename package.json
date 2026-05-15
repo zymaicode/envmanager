@@ -15,6 +15,10 @@
     "dist:portable": "electron-vite build && electron-builder --dir && node scripts/archive-build.js",
     "test": "vitest run",
     "test:watch": "vitest",
+    "build:web": "electron-vite build && npx esbuild server/index.ts --bundle --platform=node --outfile=out/server/index.js --external:express --external:dockerode",
+    "docker:build": "npm run build:web && docker build -t envmanager -f docker/Dockerfile .",
+    "docker:up": "npm run build:web && docker compose -f docker/docker-compose.yml up -d --build",
+    "docker:down": "docker compose -f docker/docker-compose.yml down",
     "postinstall": "electron-builder install-app-deps"
   },
   "build": {
@@ -84,6 +88,7 @@
     "electron": "^31.4.0",
     "electron-builder": "^24.13.3",
     "electron-vite": "^2.3.0",
+    "esbuild": "^0.28.0",
     "sharp": "^0.34.5",
     "tailwindcss": "^4.3.0",
     "typescript": "^5.5.4",

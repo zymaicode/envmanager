@@ -1,0 +1,23 @@
+version: "3.8"
+
+services:
+  envmanager:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: envmanager
+    ports:
+      - "${PORT:-20920}:20920"
+    volumes:
+      # Grant access to host Docker daemon
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Persist settings
+      - envmanager-data:/app/data
+    environment:
+      - PORT=20920
+      # For Windows Docker Desktop with WSL2
+      - DOCKER_HOST=${DOCKER_HOST:-}
+    restart: unless-stopped
+
+volumes:
+  envmanager-data:

@@ -1,25 +1,32 @@
 # 环境管理平台 (EnvManager)
 
-基于 Electron 的容器化开发环境管理桌面应用。可视化创建、管理 Docker 开发容器，支持 VS Code 远程开发和内置终端。
+可视化创建、管理 Docker 容器化开发环境。支持两种部署形态，共用 90% 代码。
+
+## 部署形态
+
+| 形态 | 入口 | 用户场景 | 启动方式 |
+|------|------|---------|---------|
+| **Electron 桌面版** | `src/main/index.ts` | 个人开发者双击打开 | `npm run dev` → Electron 窗口 |
+| **Docker 自托管版** | `server/index.ts` | 团队/服务器部署，浏览器访问 | `docker compose up -d` → `http://localhost:20920` |
+
+两种形态共用 Express 路由（`src/main/routes.ts`）+ React 前端（`src/renderer/`）+ dockerode 逻辑（`src/main/docker.ts`）。
 
 ## 版本
 
-当前版本 **v0.2.0**
+当前版本 **v0.2.2**
 
-### v0.2.0 新增
-- **首次使用向导**：4 步引导（Docker 检测 → 选择语言镜像 → 一键下载 → 进入）
-- **异步容器创建**：轮询进度反馈，5 个真实阶段，失败自动回滚
-- **内置终端**：`docker exec -it` 打开系统终端，VS Code 降级方案
-- **数据库模板**：MySQL 8.0/8.4、PostgreSQL 16/17、Redis 7、MongoDB 7
-- **资源监控**：CPU/内存进度条，Header 内存显示
-- **克隆环境**：基于现有容器快速创建同语言版本的新环境
+### v0.2.2 新增
+- 容器配置热编辑（端口映射在线修改）
+- 磁盘空间可视化（docker system df + 一键清理）
+- 容器自动休眠（闲置 N 分钟后自动暂停）
+- 应用自动更新（GitHub Releases）
+- 镜像拉取进度实时展示（图层级下载状态）
+- Docker 连接实探（API 探针替代文件检测）
+- 打包产物按版本归档
 
-### v0.1.0 基础
-- 环境市场（6 种语言 × 多个版本）
-- 容器生命周期管理（创建/启停/销毁/日志）
-- 镜像管理（下载/删除/批量清理）
-- VS Code Remote SSH 集成
-- 系统设置（端口/路径/清理策略持久化）
+### 历史版本
+- v0.2.1: 容器交互修复 + 环境就绪验证 + 代码审查优化 + 模块化拆分
+- v0.2.0: 首次使用向导 + 异步创建 + 内置终端 + 数据库模板 + 克隆环境 + 资源监控
 
 ## 技术栈
 
@@ -28,56 +35,58 @@
 - **UI 图标**: lucide-react
 - **状态管理**: Zustand
 - **路由**: react-router v7 (HashRouter)
-- **后端**: Express (Electron main process 内嵌)
+- **后端**: Express（桌面版内嵌 Electron main process，Docker 版独立启动）
 - **Docker 交互**: dockerode
-- **打包**: electron-builder（免安装绿色版 + NSIS 安装包）
+- **打包**: electron-builder（桌面版） + Docker 镜像（自托管版）
+- **测试**: vitest（12 测试）
 
 ## 项目结构
 
 ```
 src/
-├── main/                 # Electron 主进程
-│   ├── index.ts          # 窗口管理（1280×800，1024×768 最小）
-│   ├── server.ts         # Express API Server（端口 20920）+ Docker 操作
-│   └── ipc-handlers.ts   # IPC 通道（选目录/VS Code/终端）
+├── main/                      # 后端核心（两种形态共用）
+│   ├── index.ts               # Electron 桌面版入口（窗口管理 + 调用 server）
+│   ├── server.ts              # Express 启动入口
+│   ├── routes.ts              # 所有 API 路由（~260 行）
+│   ├── docker.ts              # Docker 连接 + 辅助函数（~165 行）
+│   ├── templates.ts           # 环境模板配置数据（~115 行）
+│   ├── ipc-handlers.ts        # Electron IPC 通道
+│   └── __tests__/             # 后端测试
 ├── preload/
-│   └── index.ts          # contextBridge 暴露 electronAPI
-└── renderer/
-    ├── index.html
-    └── src/
-        ├── main.tsx      # React 入口
-        ├── App.tsx       # 路由 + 首次使用向导集成
-        ├── index.css     # Tailwind v4 @theme（配色 + 字号）
-        ├── layouts/
-        │   └── AppLayout.tsx      # Sidebar + Header + Outlet
-        ├── pages/
-        │   ├── Marketplace.tsx    # 环境市场（搜索/卡片/版本抽屉/创建）
-        │   ├── Workspace.tsx      # 我的工作台（统计/卡片表格双视图/操作）
-        │   ├── ImageManager.tsx   # 镜像管理（常用下载/列表/清理）
-        │   └── Settings.tsx       # 系统设置（端口/路径/镜像源/清理策略）
-        ├── components/
-        │   ├── Sidebar.tsx        # 侧边栏导航
-        │   ├── Header.tsx         # 顶部栏（Docker 状态）
-        │   └── SetupWizard.tsx    # 首次使用向导（4 步）
-        ├── stores/
-        │   ├── marketplace-store.ts  # 环境市场状态
-        │   ├── container-store.ts    # 容器列表 + 系统状态
-        │   ├── image-store.ts        # 镜像列表
-        │   └── settings-store.ts     # 设置（localStorage 持久化）
-        ├── lib/
-        │   ├── api.ts    # HTTP API 封装（fetch 127.0.0.1:20920）
-        │   └── utils.ts  # cn()、formatBytes()、formatUptime()
-        └── types/
-            └── index.ts  # TypeScript 类型 + Window.electronAPI 声明
+│   └── index.ts               # contextBridge（仅桌面版使用）
+├── renderer/                  # React 前端（两种形态共用）
+│   └── src/
+│       ├── main.tsx / App.tsx / index.css
+│       ├── layouts/           # AppLayout
+│       ├── pages/             # Marketplace / Workspace / ImageManager / Settings
+│       ├── components/        # Sidebar / Header / SetupWizard
+│       ├── stores/            # marketplace / container / image / settings
+│       └── lib/               # api.ts / utils.ts / types/
+├── server/                    # Docker 自托管版入口（新增）
+│   └── index.ts               # 纯 Express 启动（不依赖 Electron）
+├── docker/                    # Docker 部署文件（新增）
+│   ├── Dockerfile
+│   ├── docker-compose.yml
+│   └── entrypoint.sh
+└── scripts/                   # 构建脚本
+    └── archive-build.js       # 打包产物版本归档
 ```
 
 ## 常用命令
 
 ```bash
-npm run dev      # 开发模式（热更新，renderer 端口 5173）
-npm run build    # electron-vite 构建（检查用）
-npm run pack     # 免安装绿色版 → dist/win-unpacked/
-npm run dist     # NSIS 安装包 → dist/环境管理平台 Setup x.x.x.exe
+# 开发
+npm run dev           # Electron 桌面版开发模式
+npm run test          # 运行测试
+
+# 桌面版打包
+npm run dist          # 安装包 + 绿色版（一步产出两种）
+npm run dist:installer  # 仅 NSIS 安装包
+npm run dist:portable   # 仅绿色版
+
+# Docker 版
+docker compose up -d  # 启动 Docker 自托管版
+docker compose down   # 停止
 ```
 
 ## API 设计
@@ -89,16 +98,22 @@ npm run dist     # NSIS 安装包 → dist/环境管理平台 Setup x.x.x.exe
 | GET | `/api/containers/:id` | 容器详情（含实时 stats） |
 | POST | `/api/containers` | 创建容器（返回 taskId，轮询进度） |
 | GET | `/api/containers/create/:taskId` | 查询创建进度 |
+| PUT | `/api/containers/:id/config` | 更新容器配置（端口映射） |
+| GET | `/api/containers/:id/config` | 获取容器可编辑配置 |
 | POST | `/api/containers/:id/stop` | 停止容器 |
 | POST | `/api/containers/:id/start` | 启动容器 |
 | DELETE | `/api/containers/:id` | 强制销毁容器 |
 | GET | `/api/containers/:id/logs` | 获取容器日志 |
-| POST | `/api/containers/:id/open-vscode` | 生成 VS Code SSH 配置 |
+| POST | `/api/containers/:id/exec` | 在容器中执行命令 |
+| POST | `/api/containers/:id/open-vscode` | 打开终端 |
 | GET | `/api/images` | 本地镜像列表 |
-| POST | `/api/images/pull` | 拉取镜像 |
+| POST | `/api/images/pull` | 拉取镜像（异步 + 进度） |
+| GET | `/api/images/pull/:taskId` | 查询拉取进度 |
 | DELETE | `/api/images/:id` | 删除镜像 |
 | POST | `/api/images/cleanup` | 批量清理悬空镜像 |
 | GET | `/api/images/check/:image` | 检查镜像是否已缓存 |
+| GET | `/api/system/disk-usage` | 磁盘空间使用详情 |
+| POST | `/api/system/auto-sleep/config` | 配置容器自动休眠 |
 | GET | `/api/status` | Docker 系统状态 |
 
 ## 设计规范
@@ -106,17 +121,15 @@ npm run dist     # NSIS 安装包 → dist/环境管理平台 Setup x.x.x.exe
 - **配色**: 低饱和度暖白 + 柔和中性色系
   - 主背景 `#F7F5F2` / 卡片 `#FFFFFF` / 强调色 `#B97C57`（暖棕） / 边框 `#E8E4DF`
   - 状态色：运行 `#7BA87F` / 停止 `#D4A853` / 异常 `#C4665A`
-- **字号**: 桌面基准 13px（覆盖了 Tailwind 默认的 16px 基准）
-  - `text-xs`: 11px / `text-sm`: 13px / `text-base`: 14px / `text-lg`: 15px / `text-xl`: 17px / `text-2xl`: 20px
+- **字号**: 桌面基准 13px（覆盖 Tailwind 默认 16px 基准）
 - 所有自定义主题色和字号在 `src/renderer/src/index.css` 的 `@theme` 块中定义
 
 ## 关键设计决策
 
-- **镜像不自动拉取**：创建容器时先检查本地缓存，未找到返回 IMAGE_NOT_FOUND + 引导去镜像页
-- **异步创建 + 轮询**：POST /api/containers 立即返回 taskId，前端每 500ms 轮询进度
-- **失败自动回滚**：创建过程中任何步骤失败，自动 force remove 容器
-- **数据库模板**：独立于语言模板，无 SSH 无工作目录挂载，有环境变量 + 数据端口
-- **克隆环境**：工作台 → 点击克隆 → 跳转市场页预填语言/版本 → 选择新目录 → 创建
-- **终端降级方案**：开系统终端窗口执行 `docker exec -it`，不依赖 xterm.js
-- Electron 窗口 1280×800，最小 1024×768
-- 首次启动弹出 SetupWizard，完成后 `localStorage` 标记不再显示
+- 两种部署形态共用 Express + React + dockerode，不互相替代
+- 镜像不自动拉取，创建容器时检查本地缓存
+- 异步创建 + 轮询，失败自动回滚
+- Docker 连接用 API 实探而非文件系统检测
+- 数据库模板独立于语言模板，无 SSH/工作目录挂载
+- 打包产物按版本归档，保留最近 5 个版本
+- GitHub 公开文档使用英文
